@@ -25,8 +25,9 @@ int main(int argc, char *argv[])
   char errbuf[PCAP_ERRBUF_SIZE];	/* Error string */ // 存放错误时的错误提示
   struct bpf_program fp;		/* The compiled filter */ // 存放编译后的规则
   // char filter_exp[] = "port 23";	/* The filter expression */ // 规则字符串
-  // char filter_exp[] = "dst host 219.217.228.102"; // 目的ip为教务处网站 jwts.hit.edu.cn
-  char filter_exp[] = "tcp";
+  // char filter_exp[] = "tcp and dst host 219.217.228.102"; // 目的ip为教务处网站 jwts.hit.edu.cn
+  char filter_exp[] = "host 219.217.228.102 or 202.118.253.94 or 202.118.224.24"; //http://202.118.224.24
+  // char filter_exp[] = "tcp";
   bpf_u_int32 mask;		/* Our netmask */ // 掩码
   bpf_u_int32 net;		/* Our IP */ // 网络地址部分
   struct pcap_pkthdr header;	/* The header that pcap gives us */
@@ -57,7 +58,6 @@ int main(int argc, char *argv[])
 
   // 配置handle
   // 开启monitor模式
-  // 不知道怎么关闭, 打开后需要重启wifi才能再上网
   if (pcap_set_rfmon(handle, 1)){
     printf("开启monitor模式失败, handle已激活\n");
   } else {
@@ -71,9 +71,12 @@ int main(int argc, char *argv[])
   //  set capture protocol
   // pcap_set_protocol_linux(pcap_t *p, int protocol);
   // set the packet buffer timeout (milliseconds)
-  pcap_set_timeout(handle, 1000);
+  // pcap_set_timeout(handle, 1000);
   // set buffer size
   // int pcap_set_buffer_size(pcap_t *p, int buffer_size);
+
+  // directly delever packets with no bufferring
+  pcap_set_immediate_mode(handle, 1);
 
 
   // 激活handle
@@ -115,8 +118,6 @@ int main(int argc, char *argv[])
 
 void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_data)
 {
-    // cout<<"\t\t抓到一个包"<<endl;
-    // cout<<"-------------------------------------------------"<<endl;
     //解析数据包IP头部
     // printf("-------------------ORIGINAL BEGIN------------------------\n");
     // for (int i = 0; i < 15; i++){
@@ -128,46 +129,58 @@ void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_da
     // // printf("first four bytes: %c%c%c%c\n", *pkt_data, *(pkt_data+1), *(pkt_data+2), *(pkt_data+3));
     // printf("\n-------------------ORIGINAL FINISH------------------------\n");
     // return;
+
+    // Monitor模式
     ieee80211_radiotap_header *radio_header = (ieee80211_radiotap_header*)(pkt_data);
     int radio_header_len = /*ntohs*/(radio_header->len);
-    printf("radio_header_len: %d\n", radio_header_len);
-    pkt_data += radio_header_len;//+34; // IP头开始
+    // printf("radio_header_len: %d\n", radio_header_len);
+    pkt_data += radio_header_len; // ieee80211 frame
     // printf("first byte: %0x--%0x\n", *(pkt_data), (*pkt_data)&0xc);
-    if (((*pkt_data)&0xc) == 8) { //is data frame
-      // printf("********IAMIN*****");
-      // pkt_data += 26; // LLC开始
-      pkt_data += 34; // IP开始
-      // printf("radio_header_len: %d\n", radio_header_len);
-      IPHeader_t *ip_header=(IPHeader_t*)(pkt_data);
 
-      if (ip_header->Protocol == 6){
-        int ip_total_len = ntohs(ip_header->TotalLen);
-        int ip_header_len = ((ip_header->Ver_HLen)&0xf)*4;
+    if (((*pkt_data)&0xc) != 8){ // not data frame
+      return;
+    }
 
-        pkt_data += ip_header_len; // TCP头开始
-        TCPHeader_t *tcp_header=(TCPHeader_t*)(pkt_data);
-        int tcp_header_len = tcp_header->HeaderLen >> 2;
-        int tcp_content_len = ip_total_len-ip_header_len-tcp_header_len;
-        printf("got a TCP packet, ip_total_len: %d, ip_header_len: %d, tcp_header_len: %d, content_len: %d\n", ip_total_len, ip_header_len, tcp_header_len, tcp_content_len);
+    //is data frame
+    pkt_data += 34; // IP开始
 
-        // 读取TCP内容
-        pkt_data += tcp_header_len;
-        if (strncmp(pkt_data, "POST", 3) == 0){
-          printf("-------------------GET BEGIN------------------------\n");
-          for (int i = 0; i < tcp_content_len; i++){
-            printf("%c", *(pkt_data+i));
-          }
-          printf("\n-------------------GET FINISH------------------------\n");
-        }else if (strncmp(pkt_data, "POST", 4) == 0){
-          printf("-------------------POST BEGIN------------------------\n");
-          for (int i = 0; i < tcp_content_len; i++){
-            printf("%c", *(pkt_data+i));
-          }
-          // printf("first four bytes: %c%c%c%c\n", *pkt_data, *(pkt_data+1), *(pkt_data+2), *(pkt_data+3));
-          printf("\n-------------------POST FINISH------------------------\n");
+    // 非monitor模式
+    // if (header->len>14){
+    //   pkt_data+=14; // IP开始
+    // }
+
+    // printf("radio_header_len: %d\n", radio_header_len);
+    IPHeader_t *ip_header=(IPHeader_t*)(pkt_data);
+
+    if (ip_header->Protocol == 6){ // is tcp
+      int ip_total_len = ntohs(ip_header->TotalLen);
+      int ip_header_len = ((ip_header->Ver_HLen)&0xf)*4;
+
+      pkt_data += ip_header_len; // TCP头开始
+      TCPHeader_t *tcp_header=(TCPHeader_t*)(pkt_data);
+      int tcp_header_len = tcp_header->HeaderLen >> 2;
+      int tcp_content_len = ip_total_len-ip_header_len-tcp_header_len;
+      // printf("got a TCP packet, ip_total_len: %d, ip_header_len: %d, tcp_header_len: %d, content_len: %d\n", ip_total_len, ip_header_len, tcp_header_len, tcp_content_len);
+
+      // 读取TCP内容
+      pkt_data += tcp_header_len;
+      // if (strncmp(pkt_data, "GET", 3) == 0){
+      //   printf("-------------------GET BEGIN------------------------\n");
+      //   for (int i = 0; i < 40; i++){
+      //     printf("%c", *(pkt_data+i));
+      //   }
+      //   printf("\n-------------------GET FINISH------------------------\n");
+      // }else
+      if (strncmp(pkt_data, "POST", 4) == 0){
+        printf("-------------------POST BEGIN------------------------\n");
+        for (int i = 0; i < tcp_content_len; i++){
+          printf("%c", *(pkt_data+i));
         }
+        // printf("first four bytes: %c%c%c%c\n", *pkt_data, *(pkt_data+1), *(pkt_data+2), *(pkt_data+3));
+        printf("\n-------------------POST FINISH------------------------\n");
       }
     }
+
 
     // if(header->len>=14){
     //
