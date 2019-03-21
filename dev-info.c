@@ -35,6 +35,12 @@ int main(int argc, char *argv[])
   	net = 0;
   	mask = 0;
   }
+  printf("net: %u, mask: %u\n", net, mask);
+  u_char *sourceNet = &net;
+  u_char *sourceMask = &mask;
+  printf("Net: %d.%d.%d.%d\n", sourceNet[0], sourceNet[1], sourceNet[2], sourceNet[3]);
+  printf("Mask: %d.%d.%d.%d\n", sourceMask[0], sourceMask[1], sourceMask[2], sourceMask[3]);
+  
   /* Open the session in promiscuous mode */
   handle = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf);
   if (handle == NULL) {

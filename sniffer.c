@@ -1,5 +1,11 @@
 #include <pcap.h>
 #include <stdio.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include "headers.h"
+
+void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_data);
 
 int main(int argc, char *argv[])
 {
@@ -8,9 +14,10 @@ int main(int argc, char *argv[])
   char *dev;			/* The device to sniff on */ // 设备名
   char errbuf[PCAP_ERRBUF_SIZE];	/* Error string */ // 存放错误时的错误提示
   struct bpf_program fp;		/* The compiled filter */ // 存放编译后的规则
-  char filter_exp[] = "port 23";	/* The filter expression */ // 规则字符串
+  // char filter_exp[] = "port 23";	/* The filter expression */ // 规则字符串
+  char filter_exp[] = "dst host 219.217.228.102"; // 目的ip为教务处网站 jwts.hit.edu.cn
   bpf_u_int32 mask;		/* Our netmask */ // 掩码
-  bpf_u_int32 net;		/* Our IP */ //
+  bpf_u_int32 net;		/* Our IP */ // 网络地址部分
   struct pcap_pkthdr header;	/* The header that pcap gives us */
   const u_char *packet;		/* The actual packet */
 
@@ -20,15 +27,8 @@ int main(int argc, char *argv[])
   	fprintf(stderr, "Couldn't find default device: %s\n", errbuf);
   	return(2);
   }
-  /* Find the properties for the device */
-  // 决定IPv4网络号和掩码
-  if (pcap_lookupnet(dev, &net, &mask, errbuf) == -1) {
-  	fprintf(stderr, "Couldn't get netmask for device %s: %s\n", dev, errbuf);
-  	net = 0;
-  	mask = 0;
-  }
 
-
+  // 直接打开设备handle
   /* Open the session in promiscuous mode */
   // handle = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf);
   // if (handle == NULL) {
@@ -36,7 +36,7 @@ int main(int argc, char *argv[])
   // 	return(2);
   // }
 
-  // 打开设备
+  // 创建handle
   handle = pcap_create(dev, errbuf);
   if (handle == NULL) {
     fprintf(stderr, "Couldn't open device %s: %s\n", dev, errbuf);
@@ -44,7 +44,6 @@ int main(int argc, char *argv[])
   }
 
   // 配置handle
-
   // 开启monitor模式
   // 不知道怎么关闭, 打开后需要重启wifi才能再上网
   if (pcap_set_rfmon(handle, 1)){
@@ -53,7 +52,8 @@ int main(int argc, char *argv[])
     printf("已打开monitor mode\n");
   }
   // 设置snapshot length
-  pcap_set_snaplen(handle, BUFSIZ);
+  pcap_set_snaplen(handle, 65535);
+  // printf("BUFSIZ: %u", BUFSIZ); // 8192
   // 打开混淆模式
   pcap_set_promisc(handle, 1);
   //  set capture protocol
@@ -77,21 +77,58 @@ int main(int argc, char *argv[])
   }
 
   /* Compile and apply the filter */
-  // if (pcap_compile(handle, &fp, filter_exp, 0, net) == -1) {
-  // 	fprintf(stderr, "Couldn't parse filter %s: %s\n", filter_exp, pcap_geterr(handle));
-  // 	return(2);
-  // }
-  // if (pcap_setfilter(handle, &fp) == -1) {
-  // 	fprintf(stderr, "Couldn't install filter %s: %s\n", filter_exp, pcap_geterr(handle));
-  // 	return(2);
-  // }
-  /* Grab a packet */
-  packet = pcap_next(handle, &header);
-  /* Print its length */
-  printf("Jacked a packet with length of [%d]\n", header.len);
-  /* And close the session */
-    // 开启monitor模式
+  if (pcap_compile(handle, &fp, filter_exp, 0, net) == -1) {
+  	fprintf(stderr, "Couldn't parse filter %s: %s\n", filter_exp, pcap_geterr(handle));
+  	return(2);
+  }
+  if (pcap_setfilter(handle, &fp) == -1) {
+  	fprintf(stderr, "Couldn't install filter %s: %s\n", filter_exp, pcap_geterr(handle));
+  	return(2);
+  }
 
+  // 捕获一个包
+  /* Grab a packet */
+  // packet = pcap_next(handle, &header);
+  /* Print its length */
+  // printf("Jacked a packet with length of [%d]\n", header.len);
+
+  // 关闭session
+  /* And close the session */
+  pcap_loop(handle, -1, callback, NULL);
   pcap_close(handle);
   return(0);
+}
+
+
+void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_data)
+{
+    // cout<<"\t\t抓到一个包"<<endl;
+    // cout<<"-------------------------------------------------"<<endl;
+    //解析数据包IP头部
+    if(header->len>=14){
+        pkt_data += 14; // IP头开始
+        IPHeader_t *ip_header=(IPHeader_t*)(pkt_data);
+
+        if (ip_header->Protocol == 6){
+          int ip_total_len = ntohs(ip_header->TotalLen);
+          int ip_header_len = ((ip_header->Ver_HLen)&0xf)*4;
+
+          pkt_data += ip_header_len; // TCP头开始
+          TCPHeader_t *tcp_header=(TCPHeader_t*)(pkt_data);
+          int tcp_header_len = tcp_header->HeaderLen >> 2;
+          int tcp_content_len = ip_total_len-ip_header_len-tcp_header_len;
+          printf("got a TCP packet, ip_total_len: %d, ip_header_len: %d, tcp_header_len: %d, content_len: %d\n", ip_total_len, ip_header_len, tcp_header_len, tcp_content_len);
+
+          // 读取TCP内容
+          pkt_data += tcp_header_len;
+          if (strncmp(pkt_data, "POST", 4) == 0){
+            printf("-------------------POST BEGIN------------------------\n");
+            for (int i = 0; i < tcp_content_len; i++){
+              printf("%c", *(pkt_data+i));
+            }
+            // printf("first four bytes: %c%c%c%c\n", *pkt_data, *(pkt_data+1), *(pkt_data+2), *(pkt_data+3));
+            printf("\n-------------------POST FINISH------------------------\n");
+          }
+        }
+    }
 }
