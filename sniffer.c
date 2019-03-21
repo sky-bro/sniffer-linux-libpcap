@@ -3,14 +3,24 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <signal.h>
 #include "headers.h"
 
+pcap_t *handle;
+
 void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_data);
+void terminate_process(int signum)
+{
+   pcap_breakloop(handle);
+   printf("****************closing session handle***************\n");
+   pcap_close(handle);
+   printf("bye!\n");
+}
 
 int main(int argc, char *argv[])
 {
   int ret;
-  pcap_t *handle;			/* Session handle */ // 通过handle访问一个session
+  // pcap_t *handle;			/* Session handle */ // 通过handle访问一个session
   char *dev;			/* The device to sniff on */ // 设备名
   char errbuf[PCAP_ERRBUF_SIZE];	/* Error string */ // 存放错误时的错误提示
   struct bpf_program fp;		/* The compiled filter */ // 存放编译后的规则
@@ -96,8 +106,9 @@ int main(int argc, char *argv[])
 
   // 关闭session
   /* And close the session */
+  signal(SIGINT, terminate_process);
   pcap_loop(handle, -1, callback, NULL);
-  pcap_close(handle);
+
   return(0);
 }
 
@@ -141,7 +152,13 @@ void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_da
 
         // 读取TCP内容
         pkt_data += tcp_header_len;
-        if (strncmp(pkt_data, "POST", 4) == 0){
+        if (strncmp(pkt_data, "POST", 3) == 0){
+          printf("-------------------GET BEGIN------------------------\n");
+          for (int i = 0; i < tcp_content_len; i++){
+            printf("%c", *(pkt_data+i));
+          }
+          printf("\n-------------------GET FINISH------------------------\n");
+        }else if (strncmp(pkt_data, "POST", 4) == 0){
           printf("-------------------POST BEGIN------------------------\n");
           for (int i = 0; i < tcp_content_len; i++){
             printf("%c", *(pkt_data+i));
