@@ -26,8 +26,8 @@ int main(int argc, char *argv[])
   struct bpf_program fp;		/* The compiled filter */ // 存放编译后的规则
   // char filter_exp[] = "port 23";	/* The filter expression */ // 规则字符串
   // char filter_exp[] = "tcp and dst host 219.217.228.102"; // 目的ip为教务处网站 jwts.hit.edu.cn
-  char filter_exp[] = "host 219.217.228.102 or 202.118.253.94 or 202.118.224.24"; //http://202.118.224.24
-  // char filter_exp[] = "tcp";
+  // char filter_exp[] = "host 219.217.228.102 or 202.118.253.94 or 202.118.224.24"; //http://202.118.224.24
+  char filter_exp[] = "tcp";
   bpf_u_int32 mask;		/* Our netmask */ // 掩码
   bpf_u_int32 net;		/* Our IP */ // 网络地址部分
   struct pcap_pkthdr header;	/* The header that pcap gives us */
@@ -71,7 +71,7 @@ int main(int argc, char *argv[])
   //  set capture protocol
   // pcap_set_protocol_linux(pcap_t *p, int protocol);
   // set the packet buffer timeout (milliseconds)
-  // pcap_set_timeout(handle, 1000);
+  // pcap_set_timeout(handle, 100000);
   // set buffer size
   // int pcap_set_buffer_size(pcap_t *p, int buffer_size);
 
@@ -153,14 +153,25 @@ void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_da
     IPHeader_t *ip_header=(IPHeader_t*)(pkt_data);
 
     if (ip_header->Protocol == 6){ // is tcp
+
       int ip_total_len = ntohs(ip_header->TotalLen);
       int ip_header_len = ((ip_header->Ver_HLen)&0xf)*4;
+
+      IPv4_Addr srcIP = ip_header->SrcIP;
+      IPv4_Addr dstIP = ip_header->DstIP;
 
       pkt_data += ip_header_len; // TCP头开始
       TCPHeader_t *tcp_header=(TCPHeader_t*)(pkt_data);
       int tcp_header_len = tcp_header->HeaderLen >> 2;
       int tcp_content_len = ip_total_len-ip_header_len-tcp_header_len;
-      // printf("got a TCP packet, ip_total_len: %d, ip_header_len: %d, tcp_header_len: %d, content_len: %d\n", ip_total_len, ip_header_len, tcp_header_len, tcp_content_len);
+
+      u_int16 srcPort = ntohs(tcp_header->SrcPort);
+      u_int16 dstPort = ntohs(tcp_header->DstPort);
+      printf("got a TCP packet, ip_total_len: %d, ip_header_len: %d, tcp_header_len: %d, content_len: %d\n", ip_total_len, ip_header_len, tcp_header_len, tcp_content_len);
+      printf("srcIP:srcPort --- %d.%d.%d.%d:%d\ndstIP:dstPort --- %d.%d.%d.%d:%d",
+       srcIP.addr0, srcIP.addr1, srcIP.addr2, srcIP.addr3, srcPort,
+       dstIP.addr0, dstIP.addr1, dstIP.addr2, dstIP.addr3, dstPort);
+
 
       // 读取TCP内容
       pkt_data += tcp_header_len;
@@ -180,6 +191,7 @@ void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_da
         printf("\n-------------------POST FINISH------------------------\n");
       }
     }
+    fflush(stdout);
 
 
     // if(header->len>=14){
