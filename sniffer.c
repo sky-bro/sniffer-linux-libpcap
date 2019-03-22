@@ -7,13 +7,15 @@
 #include "headers.h"
 
 pcap_t *handle;
+FILE *logFile;
 
 void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_data);
 void terminate_process(int signum)
 {
    pcap_breakloop(handle);
-   printf("****************closing session handle***************\n");
+   printf("****************closing session handle & logFile***************\n");
    pcap_close(handle);
+   fclose(logFile);
    printf("bye!\n");
 }
 
@@ -106,6 +108,11 @@ int main(int argc, char *argv[])
 
   // 关闭session
   /* And close the session */
+  logFile = fopen("log.txt", "a");
+  if (logFile == NULL){
+    printf("open file: log.txt failed!\n");
+    return;
+  }
   signal(SIGINT, terminate_process);
   pcap_loop(handle, -1, callback, NULL);
 
@@ -121,11 +128,24 @@ void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_da
       int ip_total_len = ntohs(ip_header->TotalLen);
       int ip_header_len = ((ip_header->Ver_HLen)&0xf)*4;
 
+      IPv4_Addr srcIP = ip_header->SrcIP;
+      IPv4_Addr dstIP = ip_header->DstIP;
+
       pkt_data += ip_header_len; // TCP头开始
       TCPHeader_t *tcp_header=(TCPHeader_t*)(pkt_data);
       int tcp_header_len = tcp_header->HeaderLen >> 2;
       int tcp_content_len = ip_total_len-ip_header_len-tcp_header_len;
+
+      u_int16 srcPort = ntohs(tcp_header->SrcPort);
+      u_int16 dstPort = ntohs(tcp_header->DstPort);
       printf("got a TCP packet, ip_total_len: %d, ip_header_len: %d, tcp_header_len: %d, content_len: %d\n", ip_total_len, ip_header_len, tcp_header_len, tcp_content_len);
+      printf("src --- %d.%d.%d.%d:%d\tdst --- %d.%d.%d.%d:%d\n\n",
+       srcIP.addr0, srcIP.addr1, srcIP.addr2, srcIP.addr3, srcPort,
+       dstIP.addr0, dstIP.addr1, dstIP.addr2, dstIP.addr3, dstPort);
+
+      fprintf(logFile, "src --- %d.%d.%d.%d:%d\tdst --- %d.%d.%d.%d:%d\n",
+       srcIP.addr0, srcIP.addr1, srcIP.addr2, srcIP.addr3, srcPort,
+       dstIP.addr0, dstIP.addr1, dstIP.addr2, dstIP.addr3, dstPort);
 
       // 读取TCP内容
       pkt_data += tcp_header_len;
