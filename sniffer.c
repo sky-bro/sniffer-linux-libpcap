@@ -58,11 +58,11 @@ int main(int argc, char *argv[])
 
   // 配置handle
   // 开启monitor模式
-  if (pcap_set_rfmon(handle, 1)){
-    printf("开启monitor模式失败, handle已激活\n");
-  } else {
-    printf("已打开monitor mode\n");
-  }
+  // if (pcap_set_rfmon(handle, 1)){
+  //   printf("开启monitor模式失败, handle已激活\n");
+  // } else {
+  //   printf("已打开monitor mode\n");
+  // }
   // 设置snapshot length
   pcap_set_snaplen(handle, 65535);
   // printf("BUFSIZ: %u", BUFSIZ); // 8192
@@ -131,23 +131,23 @@ void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_da
     // return;
 
     // Monitor模式
-    ieee80211_radiotap_header *radio_header = (ieee80211_radiotap_header*)(pkt_data);
-    int radio_header_len = /*ntohs*/(radio_header->len);
-    // printf("radio_header_len: %d\n", radio_header_len);
-    pkt_data += radio_header_len; // ieee80211 frame
-    // printf("first byte: %0x--%0x\n", *(pkt_data), (*pkt_data)&0xc);
-
-    if (((*pkt_data)&0xc) != 8){ // not data frame
-      return;
-    }
-
-    //is data frame
-    pkt_data += 34; // IP开始
+    // ieee80211_radiotap_header *radio_header = (ieee80211_radiotap_header*)(pkt_data);
+    // int radio_header_len = /*ntohs*/(radio_header->len);
+    // // printf("radio_header_len: %d\n", radio_header_len);
+    // pkt_data += radio_header_len; // ieee80211 frame
+    // // printf("first byte: %0x--%0x\n", *(pkt_data), (*pkt_data)&0xc);
+    //
+    // if (((*pkt_data)&0xc) != 8){ // not data frame
+    //   return;
+    // }
+    //
+    // //is data frame
+    // pkt_data += 34; // IP开始
 
     // 非monitor模式
-    // if (header->len>14){
-    //   pkt_data+=14; // IP开始
-    // }
+    if (header->len>14){
+      pkt_data+=14; // IP开始
+    }
 
     // printf("radio_header_len: %d\n", radio_header_len);
     IPHeader_t *ip_header=(IPHeader_t*)(pkt_data);
