@@ -5,9 +5,11 @@
 #include <arpa/inet.h>
 #include <signal.h>
 #include "headers.h"
-
-pcap_t *handle;
-FILE *logFile;
+#include <unistd.h>
+#define DEV_LEN 30
+pcap_t *handle = NULL;
+FILE *logFile = NULL;
+int isMonitor = 0;
 
 void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_data);
 void terminate_process(int signum)
@@ -15,15 +17,21 @@ void terminate_process(int signum)
    pcap_breakloop(handle);
    printf("****************closing session handle & logFile***************\n");
    pcap_close(handle);
-   fclose(logFile);
+   if (logFile)
+    fclose(logFile);
    printf("bye!\n");
 }
 
 int main(int argc, char *argv[])
 {
+  char *cmds = "-m ---- monitor mode on\n\
+-f /path/to/log.txt ---- logFile path\n\
+-l 65535 ---- snap length\n\
+-i eth0 ---- specify interface\n";
   int ret;
+  int snaplen = 65535;
   // pcap_t *handle;			/* Session handle */ // 通过handle访问一个session
-  char *dev;			/* The device to sniff on */ // 设备名
+  char dev[DEV_LEN] = {0};			/* The device to sniff on */ // 设备名
   char errbuf[PCAP_ERRBUF_SIZE];	/* Error string */ // 存放错误时的错误提示
   struct bpf_program fp;		/* The compiled filter */ // 存放编译后的规则
   // char filter_exp[] = "port 23";	/* The filter expression */ // 规则字符串
@@ -34,12 +42,66 @@ int main(int argc, char *argv[])
   bpf_u_int32 net;		/* Our IP */ // 网络地址部分
   struct pcap_pkthdr header;	/* The header that pcap gives us */
   const u_char *packet;		/* The actual packet */
+  char ch;
+	while ((ch = getopt(argc, argv, "l:i:mh")) != EOF /*-1*/) {
+		// printf("optind: %d\n", optind);
+   	switch (ch){
+	       // case 'f': // 指定filter expression
+					// 			 PORT = atoi(optarg);
+					// 			 break;
+				 case 'm': // 是否采用monitor mode
+								 isMonitor = 1;
+								 break;
+         case 'l': // 是否采用monitor mode
+								 snaplen = atoi(optarg);
+								 break;
+         case 'f': // 指定log文件路径,不使用此参数则不记录日志
+								 logFile = fopen(optarg, "a");
+                  if (logFile == NULL){
+                    printf("open log file: %s failed\n", optarg);
+                    return(2);
+                  }
+								 break;
+         case 'i': // 指定网卡设备
+                strncpy(dev, optarg, strlen(optarg)>DEV_LEN-1?DEV_LEN-1:strlen(optarg));
+                handle = pcap_create(optarg, errbuf);
+                if (handle == NULL) {
+                  fprintf(stderr, "Couldn't open device %s: %s\n", optarg, errbuf);
+                  return(2);
+                }
+                break;
+				 default:
+				 				printf("%s", cmds);
+								return 0;
+		}
+	}
+
 
   /* Define the device */
-  dev = pcap_lookupdev(errbuf);
-  if (dev == NULL) {
-  	fprintf(stderr, "Couldn't find default device: %s\n", errbuf);
-  	return(2);
+  if (!handle){
+    pcap_if_t *alldevs;
+    pcap_findalldevs(&alldevs, errbuf);
+    int choice = 0;
+    for (pcap_if_t *i = alldevs; i; i = i -> next, ++choice){
+      printf("%d: name: %s, description: %s\n", choice, i -> name, i -> description);
+    }
+    int tmp;
+    scanf("%d", &tmp);
+    if (tmp >= choice){
+      printf("Wrong dev choice!\n");
+      return(2);
+    }
+    pcap_if_t * i = alldevs;
+    while (tmp--){
+      i = i -> next;
+    }
+    strncpy(dev, i->name, strlen(i->name)>DEV_LEN-1?DEV_LEN-1:strlen(i->name));
+    handle = pcap_create(i->name, errbuf);
+    if (handle == NULL) {
+      fprintf(stderr, "Couldn't open device %s: %s\n", dev, errbuf);
+      return(2);
+    }
+    pcap_freealldevs(alldevs);
   }
 
   // 直接打开设备handle
@@ -50,26 +112,24 @@ int main(int argc, char *argv[])
   // 	return(2);
   // }
 
-  // 创建handle
-  dev = "wlp3s0";
-  handle = pcap_create(dev, errbuf);
-  if (handle == NULL) {
-    fprintf(stderr, "Couldn't open device %s: %s\n", dev, errbuf);
-    return(2);
-  }
+
+
 
   // 配置handle
   // 开启monitor模式
-  if (pcap_set_rfmon(handle, 1)){
-    printf("开启monitor模式失败, handle已激活\n");
-  } else {
-    printf("已打开monitor mode\n");
+  if (isMonitor){
+    if (pcap_set_rfmon(handle, 1)){
+      printf("开启monitor模式失败, handle已激活\n");
+    } else {
+      printf("已打开monitor mode\n");
+    }
   }
+
   // 设置snapshot length
-  pcap_set_snaplen(handle, 65535);
+  pcap_set_snaplen(handle, snaplen);
   // printf("BUFSIZ: %u", BUFSIZ); // 8192
   // 打开混淆模式
-  pcap_set_promisc(handle, 1);
+  pcap_set_promisc(handle, 1); // for 802.11, may not work, monitor mode may work!
   //  set capture protocol
   // pcap_set_protocol_linux(pcap_t *p, int protocol);
   // set the packet buffer timeout (milliseconds)
@@ -111,11 +171,7 @@ int main(int argc, char *argv[])
 
   // 关闭session
   /* And close the session */
-  logFile = fopen("log.txt", "a");
-  if (logFile == NULL){
-    printf("open log file: log.txt failed\n");
-    return;
-  }
+
   signal(SIGINT, terminate_process);
   pcap_loop(handle, -1, callback, NULL);
 
@@ -138,23 +194,24 @@ void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_da
     // return;
 
     // Monitor模式
-    ieee80211_radiotap_header *radio_header = (ieee80211_radiotap_header*)(pkt_data);
-    int radio_header_len = /*ntohs*/(radio_header->len);
-    // printf("radio_header_len: %d\n", radio_header_len);
-    pkt_data += radio_header_len; // ieee80211 frame
-    // printf("first byte: %0x--%0x\n", *(pkt_data), (*pkt_data)&0xc);
+    if (isMonitor){
+      ieee80211_radiotap_header *radio_header = (ieee80211_radiotap_header*)(pkt_data);
+      int radio_header_len = /*ntohs*/(radio_header->len);
+      // printf("radio_header_len: %d\n", radio_header_len);
+      pkt_data += radio_header_len; // ieee80211 frame
+      // printf("first byte: %0x--%0x\n", *(pkt_data), (*pkt_data)&0xc);
 
-    if (((*pkt_data)&0xc) != 8){ // not data frame
-      return;
+      if (((*pkt_data)&0xc) != 8){ // not data frame
+        return;
+      }
+      //is data frame
+      pkt_data += 34; // IP开始
+    } else {
+      // 非monitor模式
+      if (header->len>14){
+        pkt_data+=14; // IP开始
+      }
     }
-
-    //is data frame
-    pkt_data += 34; // IP开始
-
-    // 非monitor模式
-    // if (header->len>14){
-    //   pkt_data+=14; // IP开始
-    // }
 
     // printf("radio_header_len: %d\n", radio_header_len);
     IPHeader_t *ip_header=(IPHeader_t*)(pkt_data);
@@ -178,11 +235,11 @@ void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_da
       printf("src --- %d.%d.%d.%d:%d\tdst --- %d.%d.%d.%d:%d\n",
        srcIP.addr0, srcIP.addr1, srcIP.addr2, srcIP.addr3, srcPort,
        dstIP.addr0, dstIP.addr1, dstIP.addr2, dstIP.addr3, dstPort);
-
-     fprintf(logFile, "src --- %d.%d.%d.%d:%d\tdst --- %d.%d.%d.%d:%d\n",
-       srcIP.addr0, srcIP.addr1, srcIP.addr2, srcIP.addr3, srcPort,
-       dstIP.addr0, dstIP.addr1, dstIP.addr2, dstIP.addr3, dstPort);
-
+       if (logFile){
+         fprintf(logFile, "src --- %d.%d.%d.%d:%d\tdst --- %d.%d.%d.%d:%d\n",
+           srcIP.addr0, srcIP.addr1, srcIP.addr2, srcIP.addr3, srcPort,
+           dstIP.addr0, dstIP.addr1, dstIP.addr2, dstIP.addr3, dstPort);
+       }
 
       // 读取TCP内容
       pkt_data += tcp_header_len;
