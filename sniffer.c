@@ -37,13 +37,14 @@ int main(int argc, char *argv[])
   // char filter_exp[] = "port 23";	/* The filter expression */ // 规则字符串
   // char filter_exp[] = "tcp and dst host 219.217.228.102"; // 目的ip为教务处网站 jwts.hit.edu.cn
   // char filter_exp[] = "host 219.217.228.102 or 202.118.253.94 or 202.118.224.24"; //http://202.118.224.24
-  char filter_exp[] = "tcp";
+  char filter_exp[1000] = "tcp";
   bpf_u_int32 mask;		/* Our netmask */ // 掩码
   bpf_u_int32 net;		/* Our IP */ // 网络地址部分
   struct pcap_pkthdr header;	/* The header that pcap gives us */
   const u_char *packet;		/* The actual packet */
   char ch;
-	while ((ch = getopt(argc, argv, "l:i:mh")) != EOF /*-1*/) {
+  unsigned f_len;
+	while ((ch = getopt(argc, argv, "l:i:f:mhs:")) != EOF /*-1*/) {
 		// printf("optind: %d\n", optind);
    	switch (ch){
 	       // case 'f': // 指定filter expression
@@ -54,6 +55,14 @@ int main(int argc, char *argv[])
 								 break;
          case 'l': // 是否采用monitor mode
 								 snaplen = atoi(optarg);
+								 break;
+
+         case 's':
+                 f_len = strlen(optarg)<999?strlen(optarg):999;
+								 strncpy(filter_exp, optarg, f_len);
+                 filter_exp[f_len] = 0;
+                 printf("filter_exp: %s\n", filter_exp);
+                 // exit(0);
 								 break;
          case 'f': // 指定log文件路径,不使用此参数则不记录日志
 								 logFile = fopen(optarg, "a");

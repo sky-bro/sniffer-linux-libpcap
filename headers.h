@@ -12,10 +12,6 @@ typedef struct ieee80211_radiotap_header {
         u_int32       present;     /* fields present */
 } ieee80211_radiotap_header;
 
-typedef struct ieee80211 {
-
-} ieee80211;
-
 // typedef struct LLC_header {
 //         u_int8_t        version;     /* set to 0 */
 //         u_int8_t        pad;
